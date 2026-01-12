@@ -370,7 +370,7 @@ class AnkiPixDialog(QDialog):
         # === Buttons ===
         btn_layout = QHBoxLayout()
         
-        self.test_btn = QPushButton(\"🔍 Prévisualiser\")
+        self.test_btn = QPushButton("🔍 Prévisualiser")
         self.test_btn.clicked.connect(self._test_search)
         btn_layout.addWidget(self.test_btn)
         
