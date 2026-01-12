@@ -37,7 +37,7 @@ def get_config() -> Dict[str, Any]:
     default_config = {
         "pixabay_api_key": "",
         "source_field": "Front",
-        "image_type": "illustration",
+        "image_type": "photo",
         "image_position": "after"
     }
     
@@ -144,7 +144,7 @@ class AnkiPixDialog(QDialog):
         row2.addWidget(QLabel("Type d'image:"))
         self.type_combo = QComboBox()
         self.type_combo.addItems(["illustration", "photo", "vector", "all"])
-        saved_type = self.config.get("image_type", "illustration")
+        saved_type = self.config.get("image_type", "photo")
         idx = self.type_combo.findText(saved_type)
         if idx >= 0:
             self.type_combo.setCurrentIndex(idx)
