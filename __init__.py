@@ -105,14 +105,6 @@ class ConfigDialog(QDialog):
         source_layout.addWidget(self.source_field_combo)
         layout.addLayout(source_layout)
         
-        # Image Field
-        image_layout = QHBoxLayout()
-        image_layout.addWidget(QLabel("Champ image:"))
-        self.image_field_input = QLineEdit()
-        self.image_field_input.setText(self.config.get("image_field", "Image"))
-        image_layout.addWidget(self.image_field_input)
-        layout.addLayout(image_layout)
-        
         # Image Type
         type_layout = QHBoxLayout()
         type_layout.addWidget(QLabel("Type d'image:"))
@@ -139,8 +131,7 @@ class ConfigDialog(QDialog):
         """Return the configuration from dialog inputs."""
         return {
             "pixabay_api_key": self.api_key_input.text().strip(),
-            "source_field": self.source_field_combo.currentText().strip() or "Source",
-            "image_field": self.image_field_input.text().strip() or "Image",
+            "source_field": self.source_field_combo.currentText().strip() or "Front",
             "image_type": self.image_type_combo.currentText()
         }
 
@@ -161,6 +152,8 @@ def get_field_index(note, field_name: str) -> Optional[int]:
 def process_selected_notes(browser: Browser) -> None:
     """
     Process selected notes: search Pixabay and add images.
+    
+    The image is appended to the source field (Front/Back) after the text.
     
     Args:
         browser: The Anki browser instance.
@@ -187,7 +180,6 @@ def process_selected_notes(browser: Browser) -> None:
         return
     
     source_field = config["source_field"]
-    image_field = config["image_field"]
     api_key = config["pixabay_api_key"]
     image_type = config.get("image_type", "illustration")
     
@@ -197,22 +189,25 @@ def process_selected_notes(browser: Browser) -> None:
         note = mw.col.get_note(nid)
         
         source_idx = get_field_index(note, source_field)
-        image_idx = get_field_index(note, image_field)
         
         if source_idx is None:
             continue  # Skip notes without source field
-        if image_idx is None:
-            continue  # Skip notes without image field
         
-        keyword = note.fields[source_idx].strip()
-        current_image = note.fields[image_idx].strip()
+        field_content = note.fields[source_idx]
         
-        # Only process if has keyword and no image
-        if keyword and not current_image:
-            notes_to_process.append((note, source_idx, image_idx, keyword))
+        # Check if field already has an image
+        if "<img" in field_content.lower():
+            continue  # Skip, already has image
+        
+        # Extract text (keyword) - strip HTML tags for search
+        import re
+        keyword = re.sub(r'<[^>]+>', '', field_content).strip()
+        
+        if keyword:
+            notes_to_process.append((note, source_idx, keyword, field_content))
     
     if not notes_to_process:
-        showInfo("Aucune note à traiter.\n\nToutes les notes sélectionnées ont déjà une image ou n'ont pas de mot-clé source.")
+        showInfo("Aucune note à traiter.\n\nToutes les notes sélectionnées ont déjà une image ou le champ source est vide.")
         return
     
     # Confirm processing
@@ -234,7 +229,7 @@ def process_selected_notes(browser: Browser) -> None:
     processed = 0
     failed = 0
     
-    for i, (note, source_idx, image_idx, keyword) in enumerate(notes_to_process):
+    for i, (note, source_idx, keyword, original_content) in enumerate(notes_to_process):
         if progress.wasCanceled():
             break
         
@@ -254,8 +249,8 @@ def process_selected_notes(browser: Browser) -> None:
             failed += 1
             continue
         
-        # Update note with image tag
-        note.fields[image_idx] = f'<img src="{filename}">'
+        # Append image after the text in the same field
+        note.fields[source_idx] = f'{original_content}<br><img src="{filename}">'
         mw.col.update_note(note)
         processed += 1
     
@@ -270,7 +265,7 @@ def process_selected_notes(browser: Browser) -> None:
         f"Traitement terminé !\n\n"
         f"✓ Images ajoutées: {processed}\n"
         f"✗ Échecs: {failed}\n"
-        f"○ Non traitées: {len(selected_nids) - len(notes_to_process)}"
+        f"○ Ignorées: {len(selected_nids) - len(notes_to_process)}"
     )
 
 

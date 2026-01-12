@@ -1,6 +1,5 @@
 {
     "pixabay_api_key": "",
-    "source_field": "Source",
-    "image_field": "Image",
+    "source_field": "Front",
     "image_type": "illustration"
 }
