@@ -93,9 +93,16 @@ class ConfigDialog(QDialog):
         # Source Field
         source_layout = QHBoxLayout()
         source_layout.addWidget(QLabel("Champ source (mot-clé):"))
-        self.source_field_input = QLineEdit()
-        self.source_field_input.setText(self.config.get("source_field", "Source"))
-        source_layout.addWidget(self.source_field_input)
+        self.source_field_combo = QComboBox()
+        self.source_field_combo.addItems(["Front", "Back", "Source"])
+        self.source_field_combo.setEditable(True)  # Allow custom values
+        current_source = self.config.get("source_field", "Source")
+        index = self.source_field_combo.findText(current_source, Qt.MatchFlag.MatchFixedString)
+        if index >= 0:
+            self.source_field_combo.setCurrentIndex(index)
+        else:
+            self.source_field_combo.setCurrentText(current_source)
+        source_layout.addWidget(self.source_field_combo)
         layout.addLayout(source_layout)
         
         # Image Field
@@ -132,7 +139,7 @@ class ConfigDialog(QDialog):
         """Return the configuration from dialog inputs."""
         return {
             "pixabay_api_key": self.api_key_input.text().strip(),
-            "source_field": self.source_field_input.text().strip() or "Source",
+            "source_field": self.source_field_combo.currentText().strip() or "Source",
             "image_field": self.image_field_input.text().strip() or "Image",
             "image_type": self.image_type_combo.currentText()
         }
