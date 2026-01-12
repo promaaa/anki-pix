@@ -19,10 +19,60 @@ except ImportError:
 PIXABAY_API_URL = "https://pixabay.com/api/"
 
 
+def search_images(
+    keyword: str,
+    api_key: str,
+    image_type: str = "photo",
+    count: int = 5
+) -> list:
+    """
+    Search for multiple images on Pixabay.
+    
+    Args:
+        keyword: The search term.
+        api_key: Pixabay API key.
+        image_type: Type of image.
+        count: Number of images to return.
+        
+    Returns:
+        List of dicts with 'preview' (thumbnail) and 'url' (full size) keys.
+    """
+    if not requests or not api_key:
+        return []
+    
+    params = {
+        "key": api_key,
+        "q": keyword,
+        "image_type": image_type,
+        "lang": "fr",
+        "safesearch": "true",
+        "per_page": count,
+    }
+    
+    try:
+        response = requests.get(PIXABAY_API_URL, params=params, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        
+        results = []
+        for hit in data.get("hits", []):
+            results.append({
+                "preview": hit.get("previewURL", ""),
+                "url": hit.get("webformatURL", ""),
+                "tags": hit.get("tags", "")
+            })
+        
+        return results
+        
+    except Exception as e:
+        print(f"Anki-Pix: Search error - {e}")
+        return []
+
+
 def search_image(
     keyword: str,
     api_key: str,
-    image_type: str = "illustration"
+    image_type: str = "photo"
 ) -> Optional[str]:
     """
     Search for an image on Pixabay.

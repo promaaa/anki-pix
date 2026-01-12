@@ -16,7 +16,8 @@ from aqt.browser import Browser
 from aqt.qt import (
     QAction, QDialog, QVBoxLayout, QHBoxLayout, QLabel, 
     QLineEdit, QComboBox, QPushButton, QProgressDialog,
-    QGroupBox, QTextEdit, QFrame, QSizePolicy,
+    QGroupBox, QTextEdit, QFrame, QSizePolicy, QGridLayout,
+    QPixmap, QByteArray, QCursor, QScrollArea, QWidget,
     Qt
 )
 from aqt.utils import showInfo, showWarning
@@ -73,6 +74,171 @@ POSITION_OPTIONS = {
     "before": "Avant le texte",
     "replace": "Remplacer le texte"
 }
+
+
+class ClickableImageLabel(QLabel):
+    """A QLabel that displays an image and is clickable."""
+    
+    def __init__(self, image_data: dict, index: int, parent=None):
+        super().__init__(parent)
+        self.image_data = image_data
+        self.index = index
+        self.selected = False
+        self.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self.setFixedSize(150, 150)
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setStyleSheet("""
+            QLabel {
+                border: 3px solid #ddd;
+                border-radius: 8px;
+                background-color: #f9f9f9;
+            }
+            QLabel:hover {
+                border-color: #4a90d9;
+            }
+        """)
+    
+    def set_selected(self, selected: bool):
+        self.selected = selected
+        if selected:
+            self.setStyleSheet("""
+                QLabel {
+                    border: 3px solid #4CAF50;
+                    border-radius: 8px;
+                    background-color: #e8f5e9;
+                }
+            """)
+        else:
+            self.setStyleSheet("""
+                QLabel {
+                    border: 3px solid #ddd;
+                    border-radius: 8px;
+                    background-color: #f9f9f9;
+                }
+                QLabel:hover {
+                    border-color: #4a90d9;
+                }
+            """)
+    
+    def mousePressEvent(self, event):
+        if self.parent() and hasattr(self.parent(), 'parent'):
+            dialog = self.parent().parent().parent().parent()
+            if hasattr(dialog, 'select_image'):
+                dialog.select_image(self.index)
+
+
+class ImagePreviewDialog(QDialog):
+    """Dialog showing multiple image thumbnails for selection."""
+    
+    def __init__(self, keyword: str, images: list, parent=None):
+        super().__init__(parent)
+        self.keyword = keyword
+        self.images = images
+        self.selected_index = 0
+        self.image_labels: List[ClickableImageLabel] = []
+        self.selected_url: Optional[str] = None
+        
+        self._setup_ui()
+        self._load_thumbnails()
+    
+    def _setup_ui(self):
+        self.setWindowTitle(f"Résultats pour \"{self.keyword}\"")
+        self.setMinimumWidth(550)
+        self.setMinimumHeight(300)
+        
+        layout = QVBoxLayout(self)
+        
+        # Info label
+        info = QLabel(f"Cliquez sur une image pour la sélectionner:")
+        info.setStyleSheet("font-weight: bold; color: #333;")
+        layout.addWidget(info)
+        
+        # Scroll area for images
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        
+        container = QWidget()
+        self.grid_layout = QHBoxLayout(container)
+        self.grid_layout.setSpacing(10)
+        
+        # Create image placeholders
+        for i, img_data in enumerate(self.images):
+            label = ClickableImageLabel(img_data, i, container)
+            label.setText("⏳")
+            self.image_labels.append(label)
+            self.grid_layout.addWidget(label)
+        
+        self.grid_layout.addStretch()
+        scroll.setWidget(container)
+        layout.addWidget(scroll)
+        
+        # Tags label
+        self.tags_label = QLabel("")
+        self.tags_label.setStyleSheet("color: #666; font-style: italic;")
+        layout.addWidget(self.tags_label)
+        
+        # Buttons
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        
+        cancel_btn = QPushButton("Annuler")
+        cancel_btn.clicked.connect(self.reject)
+        btn_layout.addWidget(cancel_btn)
+        
+        self.use_btn = QPushButton("✓ Utiliser cette image")
+        self.use_btn.setDefault(True)
+        self.use_btn.clicked.connect(self.accept)
+        btn_layout.addWidget(self.use_btn)
+        
+        layout.addLayout(btn_layout)
+        
+        # Select first image by default
+        if self.image_labels:
+            self.select_image(0)
+    
+    def select_image(self, index: int):
+        """Select an image by index."""
+        self.selected_index = index
+        self.selected_url = self.images[index]["url"] if index < len(self.images) else None
+        
+        # Update visual selection
+        for i, label in enumerate(self.image_labels):
+            label.set_selected(i == index)
+        
+        # Update tags
+        if index < len(self.images):
+            tags = self.images[index].get("tags", "")
+            self.tags_label.setText(f"Tags: {tags}")
+    
+    def _load_thumbnails(self):
+        """Load thumbnail images from URLs."""
+        try:
+            import requests
+        except ImportError:
+            return
+        
+        for i, img_data in enumerate(self.images):
+            try:
+                response = requests.get(img_data["preview"], timeout=5)
+                if response.status_code == 200:
+                    pixmap = QPixmap()
+                    pixmap.loadFromData(QByteArray(response.content))
+                    scaled = pixmap.scaled(
+                        140, 140, 
+                        Qt.AspectRatioMode.KeepAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation
+                    )
+                    self.image_labels[i].setPixmap(scaled)
+            except Exception as e:
+                self.image_labels[i].setText("❌")
+                print(f"Anki-Pix: Thumbnail load error - {e}")
+            
+            mw.app.processEvents()
+    
+    def get_selected_url(self) -> Optional[str]:
+        """Return the URL of the selected image."""
+        return self.selected_url
 
 
 class AnkiPixDialog(QDialog):
@@ -204,7 +370,7 @@ class AnkiPixDialog(QDialog):
         # === Buttons ===
         btn_layout = QHBoxLayout()
         
-        self.test_btn = QPushButton("🔍 Tester recherche")
+        self.test_btn = QPushButton(\"🔍 Prévisualiser\")
         self.test_btn.clicked.connect(self._test_search)
         btn_layout.addWidget(self.test_btn)
         
@@ -292,7 +458,7 @@ class AnkiPixDialog(QDialog):
         self.notes_to_process_count = to_process
     
     def _test_search(self) -> None:
-        """Test Pixabay search with current keyword."""
+        """Test Pixabay search with current keyword and show image preview."""
         api_key = self.api_key_input.text().strip()
         if not api_key:
             showWarning("Veuillez entrer votre clé API Pixabay.")
@@ -312,15 +478,22 @@ class AnkiPixDialog(QDialog):
         self.test_btn.setEnabled(False)
         mw.app.processEvents()
         
-        url = pixabay.search_image(keyword, api_key, image_type)
+        # Get multiple images
+        images = pixabay.search_images(keyword, api_key, image_type, count=5)
         
-        self.test_btn.setText("🔍 Tester recherche")
+        self.test_btn.setText("🔍 Prévisualiser")
         self.test_btn.setEnabled(True)
         
-        if url:
-            showInfo(f"✅ Image trouvée!\n\nMot-clé: {keyword}\nURL: {url[:80]}...")
-        else:
+        if not images:
             showWarning(f"❌ Aucune image trouvée pour '{keyword}'")
+            return
+        
+        # Open preview dialog
+        preview_dialog = ImagePreviewDialog(keyword, images, self)
+        if preview_dialog.exec():
+            selected_url = preview_dialog.get_selected_url()
+            if selected_url:
+                showInfo(f"✅ Image sélectionnée!\n\nCette image sera utilisée lors de l'application.")
     
     def _apply(self) -> None:
         """Apply images to selected notes."""
