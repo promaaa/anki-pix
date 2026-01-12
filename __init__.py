@@ -2,105 +2,316 @@
 """
 Anki-Pix: Add-on pour ajouter des images Pixabay aux notes Anki.
 
-Ce module s'intègre dans le menu 'Outils' du Browser Anki
+Ce module s'intègre dans le menu 'Édition' du Browser Anki
 pour permettre l'ajout automatique d'images aux notes sélectionnées.
 """
 
+import json
+import os
+from typing import Optional, Dict, Any
+
 from aqt import mw
 from aqt.browser import Browser
-from aqt.qt import QAction
-from aqt.utils import showInfo
+from aqt.qt import (
+    QAction, QDialog, QVBoxLayout, QHBoxLayout, QLabel, 
+    QLineEdit, QComboBox, QPushButton, QProgressDialog,
+    Qt
+)
+from aqt.utils import showInfo, showWarning, askUser
+
+# Import local module
+from . import pixabay
 
 
-def on_test_selected_notes(browser: Browser) -> None:
-    """
-    Fonction de test : affiche les informations des notes sélectionnées.
+# ============================================================================
+# Configuration Management
+# ============================================================================
+
+def get_config() -> Dict[str, Any]:
+    """Load add-on configuration."""
+    addon_dir = os.path.dirname(__file__)
+    config_path = os.path.join(addon_dir, "config.json")
     
-    Cette fonction récupère les notes sélectionnées dans le Browser
-    et affiche leurs informations dans la console Anki (debug).
+    default_config = {
+        "pixabay_api_key": "",
+        "source_field": "Source",
+        "image_field": "Image",
+        "image_type": "illustration"
+    }
+    
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            config = json.load(f)
+            # Merge with defaults
+            for key, value in default_config.items():
+                if key not in config:
+                    config[key] = value
+            return config
+    except Exception:
+        return default_config
+
+
+def save_config(config: Dict[str, Any]) -> None:
+    """Save add-on configuration."""
+    addon_dir = os.path.dirname(__file__)
+    config_path = os.path.join(addon_dir, "config.json")
+    
+    try:
+        with open(config_path, "w", encoding="utf-8") as f:
+            json.dump(config, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        print(f"Anki-Pix: Config save error - {e}")
+
+
+# ============================================================================
+# Configuration Dialog
+# ============================================================================
+
+class ConfigDialog(QDialog):
+    """Dialog for configuring Anki-Pix settings."""
+    
+    def __init__(self, parent=None, config: Dict[str, Any] = None):
+        super().__init__(parent)
+        self.config = config or get_config()
+        self.setup_ui()
+    
+    def setup_ui(self):
+        self.setWindowTitle("Anki-Pix - Configuration")
+        self.setMinimumWidth(400)
+        
+        layout = QVBoxLayout(self)
+        
+        # API Key
+        api_layout = QHBoxLayout()
+        api_layout.addWidget(QLabel("Clé API Pixabay:"))
+        self.api_key_input = QLineEdit()
+        self.api_key_input.setText(self.config.get("pixabay_api_key", ""))
+        self.api_key_input.setPlaceholderText("Entrez votre clé API...")
+        api_layout.addWidget(self.api_key_input)
+        layout.addLayout(api_layout)
+        
+        # Source Field
+        source_layout = QHBoxLayout()
+        source_layout.addWidget(QLabel("Champ source (mot-clé):"))
+        self.source_field_input = QLineEdit()
+        self.source_field_input.setText(self.config.get("source_field", "Source"))
+        source_layout.addWidget(self.source_field_input)
+        layout.addLayout(source_layout)
+        
+        # Image Field
+        image_layout = QHBoxLayout()
+        image_layout.addWidget(QLabel("Champ image:"))
+        self.image_field_input = QLineEdit()
+        self.image_field_input.setText(self.config.get("image_field", "Image"))
+        image_layout.addWidget(self.image_field_input)
+        layout.addLayout(image_layout)
+        
+        # Image Type
+        type_layout = QHBoxLayout()
+        type_layout.addWidget(QLabel("Type d'image:"))
+        self.image_type_combo = QComboBox()
+        self.image_type_combo.addItems(["illustration", "photo", "vector", "all"])
+        current_type = self.config.get("image_type", "illustration")
+        index = self.image_type_combo.findText(current_type)
+        if index >= 0:
+            self.image_type_combo.setCurrentIndex(index)
+        type_layout.addWidget(self.image_type_combo)
+        layout.addLayout(type_layout)
+        
+        # Buttons
+        btn_layout = QHBoxLayout()
+        save_btn = QPushButton("Sauvegarder")
+        save_btn.clicked.connect(self.accept)
+        cancel_btn = QPushButton("Annuler")
+        cancel_btn.clicked.connect(self.reject)
+        btn_layout.addWidget(save_btn)
+        btn_layout.addWidget(cancel_btn)
+        layout.addLayout(btn_layout)
+    
+    def get_config(self) -> Dict[str, Any]:
+        """Return the configuration from dialog inputs."""
+        return {
+            "pixabay_api_key": self.api_key_input.text().strip(),
+            "source_field": self.source_field_input.text().strip() or "Source",
+            "image_field": self.image_field_input.text().strip() or "Image",
+            "image_type": self.image_type_combo.currentText()
+        }
+
+
+# ============================================================================
+# Main Processing
+# ============================================================================
+
+def get_field_index(note, field_name: str) -> Optional[int]:
+    """Get the index of a field by name, or None if not found."""
+    field_names = [f["name"] for f in note.note_type()["flds"]]
+    try:
+        return field_names.index(field_name)
+    except ValueError:
+        return None
+
+
+def process_selected_notes(browser: Browser) -> None:
+    """
+    Process selected notes: search Pixabay and add images.
     
     Args:
-        browser: Instance du Browser Anki.
+        browser: The Anki browser instance.
     """
-    # Récupérer les IDs des notes sélectionnées
-    selected_nids = browser.selectedNotes()
+    config = get_config()
     
+    # Check API key
+    if not config.get("pixabay_api_key"):
+        dialog = ConfigDialog(browser, config)
+        if dialog.exec():
+            config = dialog.get_config()
+            save_config(config)
+        else:
+            return
+        
+        if not config.get("pixabay_api_key"):
+            showWarning("Clé API Pixabay requise pour continuer.")
+            return
+    
+    # Get selected notes
+    selected_nids = browser.selectedNotes()
     if not selected_nids:
-        showInfo("Aucune note sélectionnée. Veuillez sélectionner au moins une note.")
+        showInfo("Aucune note sélectionnée.")
         return
     
-    print(f"\n{'='*50}")
-    print(f"Anki-Pix: Test des notes sélectionnées")
-    print(f"Nombre de notes sélectionnées: {len(selected_nids)}")
-    print(f"{'='*50}")
+    source_field = config["source_field"]
+    image_field = config["image_field"]
+    api_key = config["pixabay_api_key"]
+    image_type = config.get("image_type", "illustration")
     
-    # Parcourir les notes sélectionnées
+    # Filter notes that need processing
+    notes_to_process = []
     for nid in selected_nids:
         note = mw.col.get_note(nid)
         
-        # Récupérer le nom du modèle (type de note)
-        model_name = note.note_type()["name"]
+        source_idx = get_field_index(note, source_field)
+        image_idx = get_field_index(note, image_field)
         
-        # Récupérer les champs de la note
-        fields = note.fields
-        field_names = [f["name"] for f in note.note_type()["flds"]]
+        if source_idx is None:
+            continue  # Skip notes without source field
+        if image_idx is None:
+            continue  # Skip notes without image field
         
-        print(f"\n--- Note ID: {nid} ---")
-        print(f"Type de note: {model_name}")
-        print("Champs:")
-        for name, value in zip(field_names, fields):
-            # Tronquer les valeurs longues pour la lisibilité
-            display_value = value[:100] + "..." if len(value) > 100 else value
-            # Nettoyer le HTML pour l'affichage console
-            display_value = display_value.replace("\n", " ").strip()
-            print(f"  - {name}: {display_value}")
+        keyword = note.fields[source_idx].strip()
+        current_image = note.fields[image_idx].strip()
+        
+        # Only process if has keyword and no image
+        if keyword and not current_image:
+            notes_to_process.append((note, source_idx, image_idx, keyword))
     
-    print(f"\n{'='*50}")
-    print(f"Fin du test. Consultez la console pour les détails.")
-    print(f"{'='*50}\n")
+    if not notes_to_process:
+        showInfo("Aucune note à traiter.\n\nToutes les notes sélectionnées ont déjà une image ou n'ont pas de mot-clé source.")
+        return
     
-    # Afficher un message de confirmation à l'utilisateur
+    # Confirm processing
+    if not askUser(f"Traiter {len(notes_to_process)} note(s) ?\n\nCela va rechercher et télécharger des images depuis Pixabay."):
+        return
+    
+    # Progress dialog
+    progress = QProgressDialog(
+        "Traitement des images...", 
+        "Annuler", 
+        0, 
+        len(notes_to_process),
+        browser
+    )
+    progress.setWindowTitle("Anki-Pix")
+    progress.setWindowModality(Qt.WindowModality.WindowModal)
+    progress.show()
+    
+    processed = 0
+    failed = 0
+    
+    for i, (note, source_idx, image_idx, keyword) in enumerate(notes_to_process):
+        if progress.wasCanceled():
+            break
+        
+        progress.setValue(i)
+        progress.setLabelText(f"Recherche: {keyword}...")
+        mw.app.processEvents()
+        
+        # Search for image
+        url = pixabay.search_image(keyword, api_key, image_type)
+        if not url:
+            failed += 1
+            continue
+        
+        # Download and add to Anki media
+        filename = pixabay.download_to_anki(url, keyword, mw.col)
+        if not filename:
+            failed += 1
+            continue
+        
+        # Update note with image tag
+        note.fields[image_idx] = f'<img src="{filename}">'
+        mw.col.update_note(note)
+        processed += 1
+    
+    progress.setValue(len(notes_to_process))
+    progress.close()
+    
+    # Refresh browser
+    browser.model.reset()
+    
+    # Show summary
     showInfo(
-        f"Test terminé!\n\n"
-        f"Nombre de notes analysées: {len(selected_nids)}\n\n"
-        f"Consultez la console Anki (Debug Console) pour voir les détails."
+        f"Traitement terminé !\n\n"
+        f"✓ Images ajoutées: {processed}\n"
+        f"✗ Échecs: {failed}\n"
+        f"○ Non traitées: {len(selected_nids) - len(notes_to_process)}"
     )
 
 
+def open_config_dialog(browser: Browser) -> None:
+    """Open the configuration dialog."""
+    config = get_config()
+    dialog = ConfigDialog(browser, config)
+    if dialog.exec():
+        new_config = dialog.get_config()
+        save_config(new_config)
+        showInfo("Configuration sauvegardée !")
+
+
+# ============================================================================
+# Browser Menu Setup
+# ============================================================================
+
 def setup_browser_menu(browser: Browser) -> None:
     """
-    Configure le menu dans le Browser Anki.
+    Configure the menu in Anki Browser.
     
-    Ajoute une entrée 'Anki-Pix: Test Notes' dans le menu 'Outils'
-    du Browser pour tester la sélection des notes.
-    
-    Args:
-        browser: Instance du Browser Anki.
+    Adds Anki-Pix actions to the Edit menu.
     """
-    # Créer l'action pour le menu
-    action = QAction("Anki-Pix: Test Notes Sélectionnées", browser)
-    action.triggered.connect(lambda: on_test_selected_notes(browser))
+    # Main action: Add images
+    action_add = QAction("Anki-Pix: Ajouter Images", browser)
+    action_add.setShortcut("Ctrl+Shift+P")
+    action_add.triggered.connect(lambda: process_selected_notes(browser))
     
-    # Ajouter au menu 'Outils' (Edit menu dans le Browser)
-    # Note: Dans le Browser, le menu s'appelle 'menuEdit' mais on utilise
-    # form.menuEdit pour accéder au menu Édition
+    # Config action
+    action_config = QAction("Anki-Pix: Configuration...", browser)
+    action_config.triggered.connect(lambda: open_config_dialog(browser))
+    
+    # Add to Edit menu
     browser.form.menuEdit.addSeparator()
-    browser.form.menuEdit.addAction(action)
+    browser.form.menuEdit.addAction(action_add)
+    browser.form.menuEdit.addAction(action_config)
 
 
 def on_browser_setup_menus(browser: Browser) -> None:
-    """
-    Hook appelé quand le Browser est initialisé.
-    
-    Args:
-        browser: Instance du Browser Anki.
-    """
+    """Hook called when Browser is initialized."""
     setup_browser_menu(browser)
 
 
-# Enregistrer le hook pour le Browser
+# ============================================================================
+# Add-on Initialization
+# ============================================================================
+
 from aqt import gui_hooks
 gui_hooks.browser_menus_did_init.append(on_browser_setup_menus)
 
-# Message de chargement (visible dans la console)
 print("Anki-Pix: Add-on chargé avec succès!")
