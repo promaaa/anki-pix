@@ -179,7 +179,7 @@ class AnkiPixDialog(QDialog):
         self.current_text = QTextEdit()
         self.current_text.setReadOnly(True)
         self.current_text.setMaximumHeight(60)
-        self.current_text.setStyleSheet("background-color: #f5f5f5;")
+        self.current_text.setStyleSheet("background-color: #f5f5f5; color: #333333;")
         preview_layout.addWidget(self.current_text)
         
         # Arrow
@@ -190,7 +190,7 @@ class AnkiPixDialog(QDialog):
         self.preview_text = QTextEdit()
         self.preview_text.setReadOnly(True)
         self.preview_text.setMaximumHeight(80)
-        self.preview_text.setStyleSheet("background-color: #e8f5e9;")
+        self.preview_text.setStyleSheet("background-color: #e8f5e9; color: #333333;")
         preview_layout.addWidget(self.preview_text)
         
         layout.addWidget(preview_group)
