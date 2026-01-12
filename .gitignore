@@ -6,4 +6,3 @@ venv/
 ENV/
 .env
 .DS_Store
-test_media/

@@ -1,10 +1,10 @@
 {
     "name": "Anki-Pix",
-    "version": "0.2.0",
-    "author": "Anki-Pix Developer",
+    "version": "1.0.0",
+    "author": "promaaa",
     "homepage": "https://github.com/promaaa/anki-pix",
-    "description": "Add-on pour ajouter automatiquement des images Pixabay aux notes Anki",
+    "description": "Add images from Pixabay to your Anki flashcards automatically",
     "min_point_version": 54,
     "max_point_version": null,
-    "mod": 1736719800
+    "mod": 1736722800
 }
