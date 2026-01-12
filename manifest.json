@@ -1,0 +1,10 @@
+{
+    "name": "Anki-Pix",
+    "version": "0.1.0",
+    "author": "Anki-Pix Developer",
+    "homepage": "https://github.com/user/anki-pix",
+    "description": "Add-on pour ajouter automatiquement des images Pixabay aux notes Anki",
+    "min_point_version": 54,
+    "max_point_version": null,
+    "mod": 1736718000
+}
